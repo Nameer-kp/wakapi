@@ -8,70 +8,64 @@ on:
 jobs:
   release:
     name: 'Build, package and release to GitHub'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-latest
-            GOOS: linux
-            GOARCH: amd64
-          - platform: ubuntu-latest
-            GOOS: linux
-            GOARCH: arm64
-          - platform: windows-latest
-            GOOS: windows
-            GOARCH: amd64
-          - platform: macos-latest
-            GOOS: darwin
-            GOARCH: amd64
-          - platform: macos-latest
-            GOOS: darwin
-            GOARCH: arm64
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-latest
 
     steps:
 
-    - name: Set up Go 1.x
-      uses: actions/setup-go@v3
-      with:
-        go-version: ^1.20
-      id: go
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v3
 
-    - name: Set version
-      shell: bash
-      run: |
-        (git describe --tags --exact-match \
-          || git symbolic-ref -q --short HEAD \
-          || git rev-parse --short HEAD) > version.txt 2> /dev/null
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Prepare
-      run: |
-        mkdir -p dist/ && cd dist/
-        cp ../config.default.yml config.yml
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+            kpnameer/wakapi
+          tags: |
+            latest
+            alpine
+            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}}
 
-    - name: Build
-      working-directory: ./dist
-      shell: bash
-      run: |
-        GOOS=${{ matrix.GOOS }} GOARCH=${{ matrix.GOARCH }} CGO_ENABLED=0 \
-            go build -v -ldflags '-w -s' ../
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=kpnameer/wakapi:buildcache-alpine
+          cache-to: type=registry,ref=kpnameer/wakapi:buildcache-alpine,mode=max
 
-    - name: Compress working folder (Windows PowerShell)
-      working-directory: ./dist
-      if: "${{ matrix.GOOS == 'windows' }}"
-      run: |
-        Compress-Archive -Path .\wakapi.exe, .\config.yml -DestinationPath wakapi_${{ matrix.GOOS }}_${{ matrix.GOARCH }}.zip
+      - name: Prepare
+        run: |
+          cp ../config.gpg config.gpg
 
-    - name: Compress working folder
-      working-directory: ./dist
-      if: "${{ matrix.GOOS != 'windows' }}"
-      run: |
-        zip -9 wakapi_${{ matrix.GOOS }}_${{ matrix.GOARCH }}.zip *
-
-    - name: Upload built executable to Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ./dist/*.zip
+      - name: Run Docker container on the server using SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT }}
+          script: |
+            echo "${{ secrets.CONFIG_YML_SECRET }}" > /home/ubuntu/deployments/wakapi/config.yml
+            # Authenticate with GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GITHUB_ACTOR }} --password-stdin
+            
+            # Pull Docker image from GitHub Container Registry
+            docker pull ghcr.io/kpnameer/wakapi:latest
+            
+            # Run your Docker container
+            docker run -d --name wakapi -p 3000:3000 ghcr.io/kpnameer/wakapi:latest 
