@@ -76,4 +76,5 @@ jobs:
               -e "WAKAPI_INSECURE_COOKIES=true" \
               -e "WAKAPI_ALLOW_SIGNUP=false" \
               --name wakapi \
+              --restart=always
               ghcr.io/${{ github.repository }}/wakapi:latest
