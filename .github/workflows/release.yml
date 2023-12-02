@@ -73,4 +73,5 @@ jobs:
               -e "WAKAPI_ALLOW_SIGNUP=false" \
               --name wakapi \
               --restart=always \
+              --network host \
               ghcr.io/${{ github.repository }}/wakapi:latest
