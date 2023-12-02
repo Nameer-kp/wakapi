@@ -20,7 +20,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ghcr.io/${{ github.repository }}/kpnameer/wakapi
+            ghcr.io/${{ github.repository }}/wakapi
           tags: |
             latest
             alpine
@@ -48,10 +48,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           
 
-      - name: Prepare
-        run: |
-          cp ../config.gpg config.gpg
-
       - name: Run Docker container on the server using SSH
         uses: appleboy/ssh-action@master
         with:
@@ -60,12 +56,24 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
           script: |
-            echo "${{ secrets.CONFIG_YML_SECRET }}" > /home/ubuntu/deployments/wakapi/config.yml
-            # Authenticate with GitHub Container Registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GITHUB_ACTOR }} --password-stdin
             
             # Pull Docker image from GitHub Container Registry
-            docker pull ghcr.io/kpnameer/wakapi:latest
+            docker pull ghcr.io/${{ github.repository }}/wakapi:latest
             
             # Run your Docker container
-            docker run -d --name wakapi -p 3000:3000 ghcr.io/kpnameer/wakapi:latest 
+            docker run -d \
+              -p 3000:3000 \
+              -e "WAKAPI_PASSWORD_SALT=${{ secrets.SALT }}" \
+              -e "ENVIRONMENT=prod" \
+              -e "WAKAPI_DB_TYPE=${{ secrets.DB_TYPE }}" \
+              -e "WAKAPI_DB_PORT=${{ secrets.DB_PORT }}" \
+              -e "WAKAPI_DB_USER=${{ secrets.DB_USER }}" \
+              -e "WAKAPI_DB_PASSWORD=${{ secrets.DB_PASS }}" \
+              -e "WAKAPI_DB_HOST=${{ secrets.DB_HOST }}" \
+              -e "WAKAPI_DB_NAME=${{ secrets.DB_NAME }}" \
+              -e "WAKAPI_LISTEN_IPV4=0.0.0.0" \
+              -e "WAKAPI_INSECURE_COOKIES=true" \
+              -e "WAKAPI_ALLOW_SIGNUP=false" \
+              --name wakapi \
+              ghcr.io/${{ github.repository }}/wakapi:latest
